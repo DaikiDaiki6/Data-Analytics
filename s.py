@@ -50,7 +50,7 @@ app.layout = dbc.Container([
     dbc.Row([
         dcc.Dropdown(id='x-axis', placeholder='Select X-axis'),
         dcc.Dropdown(id='y-axis', placeholder='Select Y-axis'),
-        dcc.Dropdown(id='group-column', placeholder='Select Grouping Column (Optional)', multi=False)
+        dcc.Dropdown(id='group-column', placeholder='Select Grouping Column (Optional for Bar Chart)', multi=False)
     ]),
     dash_table.DataTable(id='data-table', page_size=12, style_table={'overflowX': 'auto'}),
     dcc.Graph(id='my-first-graph-final', figure={})
@@ -113,26 +113,50 @@ def update_graph(chart_type, x_axis, y_axis, group_column, table_data):
     # Generate the appropriate chart
     if chart_type == 'doughnut' and group_column:
         fig = px.pie(df, names=group_column, title=f"Doughnut Chart: {group_column} Distribution", hole=0.3)
+        fig.update_traces(hovertemplate='%{label}: %{percent:.2f}%')
     elif chart_type == 'bar':
         fig = px.bar(df, x=x_axis, y=y_axis, title=f"Bar Chart: {x_axis} vs {y_axis}")
+        fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}')
     elif chart_type == 'polar' and group_column:
         group_counts = df[group_column].value_counts()
+
         fig = go.Figure(go.Barpolar(
             r=group_counts.values,
             theta=[f'{g}' for g in group_counts.index],
-            marker=dict(color=group_counts.values, colorscale='Blues'),
+            marker=dict(
+                color=group_counts.values,
+                colorscale='Rainbow',  # Use a better color scale
+                line=dict(color='black', width=2)  # Add outline for better contrast
+            ),
             text=group_counts.index,
             hoverinfo='text+r'
         ))
+
         fig.update_layout(
             title=f"Polar Area Chart: {group_column} Distribution",
             polar=dict(
                 radialaxis=dict(visible=True, range=[0, group_counts.max()])
             ),
-            showlegend=False
+            showlegend=False,
+            paper_bgcolor='rgb(240, 240, 240)',  # Light background
+            plot_bgcolor='rgb(240, 240, 240)',  # Light plot background
+            font=dict(family='Arial', size=14, color='black'),  # Readable font
+            margin=dict(l=50, r=50, t=100, b=50)  # Add some padding for better layout
         )
+        fig.update_traces(hovertemplate='Category: %{theta}<br>Value: %{r}')
     elif chart_type == 'line':
-        fig = px.line(df, x=x_axis, y=y_axis, title=f"Line Chart: {x_axis} vs {y_axis}")
+        # Sort data by the x-axis (Age) for line charts only
+        df = df.sort_values(by=x_axis)
+        
+        # Check if a group column is selected
+        if group_column:
+            fig = px.line(df, x=x_axis, y=y_axis, color=group_column, title=f"Line Chart: {x_axis} vs {y_axis}",
+                          line_shape='linear', template='plotly', markers=True)
+            fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}<br>{group_column}: %{text}')
+        else:
+            fig = px.line(df, x=x_axis, y=y_axis, title=f"Line Chart: {x_axis} vs {y_axis}",
+                          line_shape='linear', template='plotly', markers=True)
+            fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}')
     elif chart_type == 'bubble':
         if group_column:
             # Ensure group_column has numeric data for sizing
@@ -166,6 +190,7 @@ def update_graph(chart_type, x_axis, y_axis, group_column, table_data):
                 paper_bgcolor='rgb(243, 243, 243)',
                 plot_bgcolor='rgb(243, 243, 243)',
             )
+            fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}<br>{group_column}: %{text}')
         else:
             fig = go.Figure().update_layout(
                 title="Bubble Chart: Grouping Column Required for Bubble Size",
@@ -176,6 +201,9 @@ def update_graph(chart_type, x_axis, y_axis, group_column, table_data):
         fig = go.Figure().update_layout(title="Invalid chart type or insufficient data.")
     
     return fig
+
+
+
 
 
 if __name__ == '__main__':
