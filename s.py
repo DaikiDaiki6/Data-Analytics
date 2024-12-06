@@ -1,210 +1,333 @@
-from dash import Dash, html, dash_table, dcc, callback, Output, Input, State
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import dash_bootstrap_components as dbc
-import io
 import base64
+import datetime
+import io
 
-# Initialize the app with a Bootstrap theme
-app = Dash(__name__, external_stylesheets=[dbc.themes.CERULEAN])
-
-# Placeholder for initial DataFrame
-df = pd.DataFrame()
-
-# App layout
-app.layout = dbc.Container([
-    dbc.Row([
-        html.Div('Dynamic CSV Visualization App', className='text-primary text-center fs-3')
-    ]),
-    html.Hr(),
-    dbc.Row([
-        dcc.Upload(
-            id='upload-data',
-            children=html.Div(['Drag and Drop or ', html.A('Select a CSV File')]),
-            style={
-                'width': '100%', 'height': '60px', 'lineHeight': '60px',
-                'borderWidth': '1px', 'borderStyle': 'dashed',
-                'borderRadius': '5px', 'textAlign': 'center'
-            },
-            multiple=False
-        )
-    ]),
-    dbc.Row([
-        html.Div(id='file-info', className='text-success mt-2')
-    ]),
-    dbc.Row([
-        dcc.RadioItems(
-            options=[
-                {'label': 'Bubble Chart', 'value': 'bubble'},
-                {'label': 'Bar Chart', 'value': 'bar'},
-                {'label': 'Doughnut Chart', 'value': 'doughnut'},
-                {'label': 'Polar Area Chart', 'value': 'polar'},
-                {'label': 'Line Chart', 'value': 'line'}
-            ],
-            value='bubble',
-            inline=True,
-            id='radio-items-final'
-        )
-    ]),
-    dbc.Row([
-        dcc.Dropdown(id='x-axis', placeholder='Select X-axis'),
-        dcc.Dropdown(id='y-axis', placeholder='Select Y-axis'),
-        dcc.Dropdown(id='group-column', placeholder='Select Grouping Column (Optional for Bar Chart)', multi=False)
-    ]),
-    dash_table.DataTable(id='data-table', page_size=12, style_table={'overflowX': 'auto'}),
-    dcc.Graph(id='my-first-graph-final', figure={})
-], fluid=True)
-
-# Callback for file upload
-@callback(
-    [Output('file-info', 'children'),
-     Output('data-table', 'data'),
-     Output('data-table', 'columns'),
-     Output('x-axis', 'options'),
-     Output('y-axis', 'options'),
-     Output('group-column', 'options')],
-    [Input('upload-data', 'contents')],
-    [State('upload-data', 'filename')]
-)
-def parse_contents(contents, filename):
-    if contents is None:
-        return 'No file uploaded yet.', [], [], [], [], []
-    
-    # Parse the uploaded file
-    content_type, content_string = contents.split(',')
-    decoded = io.StringIO(base64.b64decode(content_string).decode('utf-8'))
-    uploaded_df = pd.read_csv(decoded)
-    
-    # Generate options for dropdowns
-    options = [{'label': col, 'value': col} for col in uploaded_df.columns]
-    
-    # Display data
-    return (
-        f"Uploaded File: {filename}",
-        uploaded_df.to_dict('records'),
-        [{'name': col, 'id': col} for col in uploaded_df.columns],
-        options, options, options
-    )
+from numpy import size
+import dash_bootstrap_components as dbc
+from dash import Dash, dcc, html, dash_table, Input, Output, State, MATCH, no_update
+import plotly.express as px
+import plotly.graph_objs as go
+import pandas as pd
 
 
-# Callback for updating the graph
-@callback(
-    Output('my-first-graph-final', 'figure'),
-    [Input('radio-items-final', 'value'),
-     Input('x-axis', 'value'),
-     Input('y-axis', 'value'),
-     Input('group-column', 'value')],
-    [State('data-table', 'data')]
-)
-def update_graph(chart_type, x_axis, y_axis, group_column, table_data):
-    if not table_data or not x_axis or not y_axis:
-        return go.Figure().update_layout(title="Please upload a file and select appropriate columns.")
 
-    # Convert table data to DataFrame
-    df = pd.DataFrame(table_data)
+# Initialize the app with the SOLAR theme
+app = Dash(__name__, external_stylesheets=[dbc.themes.SOLAR], suppress_callback_exceptions=True)
 
-    # Ensure Y-axis values are numeric
-    df[y_axis] = pd.to_numeric(df[y_axis], errors='coerce')
+app.layout = html.Div([
+    dbc.Container([
+        dbc.Row([
+            dbc.Col(html.H1('GoReport!📈', style={'textAlign': 'center'}), width=12),  # Full width for title
+        ], style={'margin-bottom': '20px'}),
 
-    # Drop rows with NaN in the Y-axis
-    df = df.dropna(subset=[y_axis])
+        dbc.Row([
+            dbc.Col(html.H3('Dashboard of Multiple Chart Types', style={'textAlign': 'center'}), width=12),  # Full width for subtitle
+        ], style={'margin-bottom': '30px'}),
 
-    # Generate the appropriate chart
-    if chart_type == 'doughnut' and group_column:
-        fig = px.pie(df, names=group_column, title=f"Doughnut Chart: {group_column} Distribution", hole=0.3)
-        fig.update_traces(hovertemplate='%{label}: %{percent:.2f}%')
-    elif chart_type == 'bar':
-        fig = px.bar(df, x=x_axis, y=y_axis, title=f"Bar Chart: {x_axis} vs {y_axis}")
-        fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}')
-    elif chart_type == 'polar' and group_column:
-        group_counts = df[group_column].value_counts()
+        dbc.Row([
+            dbc.Col(dcc.Upload(
+                id='upload-data',
+                children=html.Div([
+                    'Drag and Drop or ',
+                    html.A('Select CSV/XLS Files')
+                ]),
+                style={
+                    'width': '100%',
+                    'height': '60px',
+                    'lineHeight': '60px',
+                    'borderWidth': '1px',
+                    'borderStyle': 'dashed',
+                    'borderRadius': '5px',
+                    'textAlign': 'center',
+                    'margin': '10px'
+                },
+                multiple=True
+            ), width=12)  # Full width for file upload
+        ], justify="center"),  # Center the file upload button
 
-        fig = go.Figure(go.Barpolar(
-            r=group_counts.values,
-            theta=[f'{g}' for g in group_counts.index],
-            marker=dict(
-                color=group_counts.values,
-                colorscale='Rainbow',  # Use a better color scale
-                line=dict(color='black', width=2)  # Add outline for better contrast
-            ),
-            text=group_counts.index,
-            hoverinfo='text+r'
-        ))
+        html.Div(id='output-data-upload', children=[]),
+    ], fluid=True),
+])
 
-        fig.update_layout(
-            title=f"Polar Area Chart: {group_column} Distribution",
-            polar=dict(
-                radialaxis=dict(visible=True, range=[0, group_counts.max()])
-            ),
-            showlegend=False,
-            paper_bgcolor='rgb(240, 240, 240)',  # Light background
-            plot_bgcolor='rgb(240, 240, 240)',  # Light plot background
-            font=dict(family='Arial', size=14, color='black'),  # Readable font
-            margin=dict(l=50, r=50, t=100, b=50)  # Add some padding for better layout
-        )
-        fig.update_traces(hovertemplate='Category: %{theta}<br>Value: %{r}')
-    elif chart_type == 'line':
-        # Sort data by the x-axis (Age) for line charts only
-        df = df.sort_values(by=x_axis)
-        
-        # Check if a group column is selected
-        if group_column:
-            fig = px.line(df, x=x_axis, y=y_axis, color=group_column, title=f"Line Chart: {x_axis} vs {y_axis}",
-                          line_shape='linear', template='plotly', markers=True)
-            fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}<br>{group_column}: %{text}')
-        else:
-            fig = px.line(df, x=x_axis, y=y_axis, title=f"Line Chart: {x_axis} vs {y_axis}",
-                          line_shape='linear', template='plotly', markers=True)
-            fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}')
-    elif chart_type == 'bubble':
-        if group_column:
-            # Ensure group_column has numeric data for sizing
-            df[group_column] = pd.to_numeric(df[group_column], errors='coerce')
-            df = df.dropna(subset=[group_column])  # Drop rows with invalid values
-            
-            # Calculate size reference for consistent scaling
-            max_size = df[group_column].max()
-            sizeref = 2.0 * max_size / (60 ** 2)  # Adjust maximum size (e.g., 60)
 
-            # Create Bubble Chart using plotly.graph_objects
-            fig = go.Figure(data=go.Scatter(
-                x=df[x_axis],
-                y=df[y_axis],
-                mode='markers',
-                marker=dict(
-                    size=df[group_column],
-                    sizemode='area',
-                    sizeref=sizeref,
-                    color=df[group_column],  # Heatmap-like coloring
-                    colorscale='Viridis',
-                    showscale=True  # Show color scale
-                ),
-                text=df[group_column],  # Optional: Add hover text
-                hoverinfo='text+x+y'
-            ))
-            fig.update_layout(
-                title=f"Bubble Chart: {x_axis} vs {y_axis} (Size: {group_column})",
-                xaxis_title=x_axis,
-                yaxis_title=y_axis,
-                paper_bgcolor='rgb(243, 243, 243)',
-                plot_bgcolor='rgb(243, 243, 243)',
-            )
-            fig.update_traces(hovertemplate=f'{x_axis}: %{x}<br>{y_axis}: %{y}<br>{group_column}: %{text}')
-        else:
-            fig = go.Figure().update_layout(
-                title="Bubble Chart: Grouping Column Required for Bubble Size",
-                xaxis_title=x_axis,
-                yaxis_title=y_axis
-            )
+@app.callback(Output('output-data-upload', 'children'),
+              Input('upload-data', 'contents'),
+              State('upload-data', 'filename'),
+              State('upload-data', 'last_modified'),
+              State('output-data-upload', 'children'),
+              prevent_initial_call=True
+              )
+def update_output(contents, filename, date, children):
+    if contents is not None:
+        children = []  # for getting new CSV/XLS file fix error
+
+        for i, (c, n, d) in enumerate(zip(contents, filename, date)):
+            content_type, content_string = contents[i].split(',')
+
+            decoded = base64.b64decode(content_string)
+            try:
+                if 'csv' in filename[i]:
+                    df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+                elif 'xls' in filename[i]:
+                    df = pd.read_excel(io.BytesIO(decoded))
+
+                # Convert all numeric columns to string
+                numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+                df[numeric_columns] = df[numeric_columns].astype(str)
+
+                all_columns = df.columns.tolist()
+
+                children.append(dbc.Card([  # Wrap the content in a Card
+                    dbc.CardHeader(html.H5(filename[i])),  # Display file name as card header
+                    dbc.CardBody([  # Card body to hold the data table and other content
+                        dash_table.DataTable(
+                            df.to_dict('records'),
+                            [{'name': i, 'id': i, 'selectable': True} for i in df.columns],
+                            page_size=5,
+                            filter_action='native',
+                            column_selectable='single',
+                            selected_columns=[df.columns[4]],
+                            style_table={'overflowX': 'auto'},
+                            style_cell={'color': 'black', 'fontFamily': 'Arial', 'fontSize': '14px'},  # Set text color
+                            style_header={'backgroundColor': '#f7f7f9', 'fontWeight': 'bold', 'color': 'black'},  # Header style
+                            style_data={'backgroundColor': '#ffffff', 'color': 'black'},  # Row data style
+                            id={'type': 'dynamic-table', 'index': i},
+                        ),
+                        
+                        # Dropdowns for x and y axis
+                        html.Div([
+                            html.Div([
+                                html.Label('X-Axis:'),
+                                dcc.Dropdown(
+                                    id={'type': 'x-axis-dropdown', 'index': i},
+                                    options=[{'label': col, 'value': col} for col in all_columns],
+                                    value=all_columns[1],
+                                    style={'color': 'black', 'backgroundColor': '#f7f7f7'}  # Set dropdown text color
+                                )
+                            ], style={'width': '48%', 'display': 'inline-block'}),
+
+                            html.Div([
+                                html.Label('Y-Axis:'),
+                                dcc.Dropdown(
+                                    id={'type': 'y-axis-dropdown', 'index': i},
+                                    options=[{'label': col, 'value': col} for col in numeric_columns],
+                                    value=numeric_columns[0] if numeric_columns else None,
+                                    style={'color': 'black', 'backgroundColor': '#f7f7f7'}  # Set dropdown text color
+                                )
+                            ], style={'width': '48%', 'float': 'right', 'display': 'inline-block'})
+                        ], style={'padding': '10px'}),
+
+                        # Multiple graph types (line, bar, bubble, etc.)
+                        dbc.Row([
+                            dbc.Col(dcc.Graph(id={'type': 'line-graph', 'index': i}, figure={}), width=12, lg=6, 
+                                    style={
+                                        'marginBottom': '20px',
+                                        'marginTop': '10px',
+                                        'borderRadius': '10px',  # Round the corners
+                                        'backgroundColor': '#f7f7f7',  # Optional: Add background color for visibility
+                                        'padding': '15px'  # Optional: Add padding for content spacing
+                                        }),
+                            dbc.Col(dcc.Graph(id={'type': 'bar-graph', 'index': i}, figure={}), width=12,  lg=6, 
+                                    style={
+                                        'marginBottom': '20px',
+                                        'marginTop': '10px',
+                                        'borderRadius': '10px',  # Round the corners
+                                        'backgroundColor': '#f7f7f7',  # Optional: Add background color for visibility
+                                        'padding': '15px'  # Optional: Add padding for content spacing
+                                        }),
+                            ]),
+                        dbc.Row([
+                            dbc.Col(dcc.Graph(id={'type': 'bubble-graph', 'index': i}, figure={}), width=12, lg=6,  
+                                    style={
+                                        'marginBottom': '20px',
+                                        'marginTop': '10px',
+                                        'borderRadius': '10px',  # Round the corners
+                                        'backgroundColor': '#f7f7f7',  # Optional: Add background color for visibility
+                                        'padding': '15px'  # Optional: Add padding for content spacing
+                                        }),
+                            dbc.Col(dcc.Graph(id={'type': 'doughnut-graph', 'index': i}, figure={}), width=12, lg=6,  
+                                    style={
+                                        'marginBottom': '20px',
+                                        'marginTop': '10px',
+                                        'borderRadius': '10px',  # Round the corners
+                                        'backgroundColor': '#f7f7f7',  # Optional: Add background color for visibility
+                                        'padding': '15px'  # Optional: Add padding for content spacing
+                                        }),
+                        ]),
+                        dbc.Row([
+                            dbc.Col(dcc.Graph(id={'type': 'radar-graph', 'index': i}, figure={}), width=12, lg=12, 
+                                    style={
+                                        'marginBottom': '20px',
+                                        'marginTop': '10px',
+                                        'borderRadius': '10px',  # Round the corners
+                                        'backgroundColor': '#f7f7f7',  # Optional: Add background color for visibility
+                                        'padding': '15px'  # Optional: Add padding for content spacing
+                                        }),
+                        ]),
+                    ])
+                ]))  # Close the Card
+
+            except Exception as e:
+                print(e)
+                return html.Div([
+                    'There was an error processing this file.'
+                ])
+        return children
     else:
-        fig = go.Figure().update_layout(title="Invalid chart type or insufficient data.")
-    
+        return ""
+
+
+
+# Line Chart Callback
+@app.callback(
+    Output({'type': 'line-graph', 'index': MATCH}, 'figure'),
+    [Input({'type': 'dynamic-table', 'index': MATCH}, 'derived_virtual_data'),
+     Input({'type': 'x-axis-dropdown', 'index': MATCH}, 'value'),
+     Input({'type': 'y-axis-dropdown', 'index': MATCH}, 'value')]
+)
+def create_line_chart(filtered_data, x_col, y_col):
+    if not filtered_data or not x_col or not y_col:
+        return {}
+
+    df = pd.DataFrame(filtered_data)
+    df = df.sort_values(by=x_col, ascending=True) # sorted in ascending order
+    fig = px.line(df, x=x_col, y=y_col,
+                  title=f'Line Chart: {y_col} vs {x_col}',
+                  hover_data={x_col: True, y_col: True})
     return fig
 
 
+# Bar Chart Callback
+@app.callback(
+    Output({'type': 'bar-graph', 'index': MATCH}, 'figure'),
+    [Input({'type': 'dynamic-table', 'index': MATCH}, 'derived_virtual_data'),
+     Input({'type': 'x-axis-dropdown', 'index': MATCH}, 'value'),
+     Input({'type': 'y-axis-dropdown', 'index': MATCH}, 'value')]
+)
+def create_bar_chart(filtered_data, x_col, y_col):
+    if not filtered_data or not x_col or not y_col:
+        return {}
+    df = pd.DataFrame(filtered_data)
+    # Ensure y_col is numeric
+    df[y_col] = pd.to_numeric(df[y_col], errors='coerce')
+    
+    # Drop rows where y_col is NaN
+    df = df.dropna(subset=[y_col])
+    
+    # Aggregate by x_col (Age) and sum y_col (Total Spend)
+    df_aggregated = df.groupby(x_col).agg({y_col: 'sum'}).reset_index()
 
+    # Sort the data based on x_col (Age)
+    df_aggregated = df_aggregated.sort_values(by=x_col, ascending=True)
+
+    custom_colors = ['#FF0000', '#0000FF', '#FFFF00', '#00FF00', '#800080', '#FFA500']
+
+    fig = px.bar(df, x=x_col, y=y_col, 
+                 title=f'Bar Chart: {y_col} by {x_col}', 
+                 color=df.index % len(custom_colors),
+                 color_discrete_map={i: custom_colors[i] for i in range(len(custom_colors))},
+                 barmode="group", 
+                 hover_data={x_col: True, y_col: True})
+    fig.update_layout(
+        xaxis_title=x_col,
+        yaxis_title=y_col,
+    )
+    return fig
+
+
+# Bubble Chart Callback
+@app.callback(
+    Output({'type': 'bubble-graph', 'index': MATCH}, 'figure'),
+    [Input({'type': 'dynamic-table', 'index': MATCH}, 'derived_virtual_data'),
+     Input({'type': 'x-axis-dropdown', 'index': MATCH}, 'value'),
+     Input({'type': 'y-axis-dropdown', 'index': MATCH}, 'value')]
+)
+def create_bubble_chart(filtered_data, x_col, y_col):
+    if not filtered_data or not x_col or not y_col:
+        return {}
+
+    df = pd.DataFrame(filtered_data)
+    df = df.sort_values(by=x_col, ascending=True)
+    
+    size_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    size_col = size_cols[1] if len(size_cols) > 1 else y_col
+    
+    df[size_col] = pd.to_numeric(df[size_col], errors='coerce')
+    df = df.dropna(subset=[size_col])
+    
+    max_size = df[size_col].max()
+    sizeref = 1. * max_size / (60 ** 2)
+    
+    fig = px.scatter(df, x=x_col, y=y_col, size=size_col, color=size_col, 
+                     color_continuous_scale='Viridis', title=f'Bubble Chart: {y_col} vs {x_col}', 
+                     hover_data={size_col: True, x_col: True, y_col: True})
+    fig.update_traces(
+        marker=dict(
+            sizemode = 'area',
+            sizeref = sizeref,
+            showscale = True,
+        )
+    )
+    return fig
+
+
+# Doughnut Chart Callback
+@app.callback(
+    Output({'type': 'doughnut-graph', 'index': MATCH}, 'figure'),
+    [Input({'type': 'dynamic-table', 'index': MATCH}, 'derived_virtual_data'),
+     Input({'type': 'x-axis-dropdown', 'index': MATCH}, 'value')]
+)
+def create_doughnut_chart(filtered_data, x_col):
+    if not filtered_data or not x_col:
+        return {}
+
+    df = pd.DataFrame(filtered_data)
+    df = df.sort_values(by=x_col, ascending=True)
+    
+    aggregated_data = df[x_col].value_counts()
+
+    fig = go.Figure(data=[go.Pie(labels=aggregated_data.index,
+                                 values=aggregated_data.values,
+                                 hole=.3, 
+                                 hoverinfo='label+percent+value',  # Show label, percentage, and value on hover
+                                hovertemplate=(
+                                    'Label: %{label}<br>'  # Label
+                                    'Count: %{value}<br>'  # Count of items
+                                    'Percentage: %{percent:.2f}%'  # Percentage representation
+                                )
+        )])
+    fig.update_layout(title=f'Doughnut Chart: Distribution of {x_col}')
+    return fig
+
+
+# Radar Chart Callback
+@app.callback(
+    Output({'type': 'radar-graph', 'index': MATCH}, 'figure'),
+    [Input({'type': 'dynamic-table', 'index': MATCH}, 'derived_virtual_data'),
+     Input({'type': 'x-axis-dropdown', 'index': MATCH}, 'value'),
+     Input({'type': 'y-axis-dropdown', 'index': MATCH}, 'value')]
+)
+def create_radar_chart(filtered_data, x_col, y_col):
+    if not filtered_data or not x_col or not y_col:
+        return {}
+
+    df = pd.DataFrame(filtered_data)
+    df = df.sort_values(by=x_col, ascending=True)
+    
+    fig = go.Figure(data=go.Scatterpolar(
+        r=df[y_col],
+        theta=df[x_col],
+        fill='toself',
+        hoverinfo='r+theta'
+        ))
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True)
+        ),
+        title=f'Radar Chart: {y_col} vs {x_col}'
+    )
+    return fig
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run_server(debug=True)
